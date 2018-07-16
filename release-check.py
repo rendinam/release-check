@@ -55,8 +55,8 @@ if not args.testing:
 # Compute MD5 of tarball
 # Compare hash to previously stored value (kept in some persistent
 #   filesystem storage area.)
-# If the checksums are identical, exit.
-# If the checksums differ, unpack the tarball and extract the SONAME value
+# If the hash are identical, exit.
+# If the hashes differ, unpack the tarball and extract the SONAME value
 #  compare SONAME value with previously stored value (kept in same
 #   persistent storage area.)
 #   Also extract latest changelog section for inclusion in github issue text.
@@ -71,12 +71,18 @@ fitsio_h = 'cfitsio/fitsio.h'
 changesfile = 'cfitsio/docs/changes.txt'
 
 
-
 def compute_md5(fname):
-    proc = run(['md5sum', '{}'.format(fname)], stdout=subprocess.PIPE)
-    md5 = str(proc.stdout.decode().split()[0])
-    return(md5)
+    import hashlib
+    md5 = hashlib.md5()
+    BUF_SIZE = 65536
 
+    with open(fname, 'rb') as f:
+        while True:
+            data = f.read(BUF_SIZE)
+            if not data:
+                break
+            md5.update(data)
+    return(md5.hexdigest())
 
 # Get the latest tarball, and examine it for version information.
 # Compare this with the cached reference version info and if the latest
@@ -150,7 +156,9 @@ with tempfile.TemporaryDirectory() as tmpdir:
             issue.create_comment(comment)
 
         # Update version reference to inform the next run.
+        os.chdir(sys.path[0])
         reference = '{} {} {}'.format(md5, version, soname)
+        print(reference)
         print('Updating cfitsio version refrence.  ',end='')
         try:
             with open(reference_file, 'w') as f:
