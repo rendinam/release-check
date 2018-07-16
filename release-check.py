@@ -1,5 +1,18 @@
 #!/usr/bin/env python3
 
+# A priori: compute MD5 of cfitsio 3.45, store persistently on disk.
+# Get latest tarball
+# Compute MD5 of tarball
+# Compare hash to previously stored value (kept in some persistent
+#   filesystem storage area.)
+# If the hashes are identical, exit.
+# If the hashes differ, unpack the tarball and extract the SONAME value
+#  compare SONAME value with previously stored value (kept in same
+#   persistent storage area.)
+#   Also extract latest changelog section for inclusion in github issue text.
+#   Indicate that a new release has been made in Github issue comment.
+# If the SONAME value differs, also indicate this in the status message.
+
 import os
 import sys
 import urllib.request
@@ -18,7 +31,7 @@ parser.add_argument('-p',
         action='store_true',
         help='Prompt for interactive password entry. Overrides default behavior'
         ' of accepting the password to use via the environment variable'
-        ' CFITSIO_NOTIFY_PW.')
+        ' RELEASECHECK_PW.')
 parser.add_argument('-t',
         '--testing',
         action='store_true',
@@ -48,20 +61,6 @@ if not args.testing:
             print('Store the Github password in that variable or run with `-p` to'
                     'prompt for the password interactively.')
             sys.exit(1)
-
-
-# A priori: compute MD5 of cfitsio 3.45, store persistently on disk.
-# Get latest tarball
-# Compute MD5 of tarball
-# Compare hash to previously stored value (kept in some persistent
-#   filesystem storage area.)
-# If the hash are identical, exit.
-# If the hashes differ, unpack the tarball and extract the SONAME value
-#  compare SONAME value with previously stored value (kept in same
-#   persistent storage area.)
-#   Also extract latest changelog section for inclusion in github issue text.
-#   Indicate that a new release has been made in Github issue comment.
-# If the SONAME value differs, also indicate this in the status message.
 
 
 latest_tar = 'cfitsio_latest.tar.gz'
@@ -127,7 +126,7 @@ with tempfile.TemporaryDirectory() as tmpdir:
 
         # Get changelog message for the latest release.
         comment = ('This is a message from an automated system that monitors `cfitsio` releases.\n'
-                  '`cfitsio`')
+                  '`cfitsio`  ')
         with open(changesfile) as cf:
             sec_open = False
             for line in cf.readlines():
