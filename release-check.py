@@ -2,6 +2,7 @@
 
 import os
 import sys
+import configparser
 import urllib.request
 import subprocess
 from subprocess import run
@@ -22,8 +23,8 @@ parser.add_argument('-p',
         help='Prompt for interactive password entry. Overrides default behavior'
         ' of accepting the password to use via the environment variable'
         ' RELEASECHECK_PW.')
-parser.add_argument('-t',
-        '--testing',
+parser.add_argument('-d',
+        '--dry-run',
         action='store_true',
         help='All output to local console. Does not communicate with Github.')
 parser.add_argument('username',
@@ -39,14 +40,18 @@ parser.add_argument('notify_repo',
         type=str,
         help='Required. Repository in which an issue comment should be posted.'
         'Specified in the form <organization>/<repository>')
-#parser.add_argument('-c',
-#        '--config',
-#        type=str,
-#        help='Configuration file to use in determining behavior.')
+parser.add_argument('-c',
+        '--config',
+        type=str,
+        help='Required. Configuration file defining dependencies to query.')
 
 args = parser.parse_args()
 
-if not args.testing:
+if not args.config:
+    print('Please supply a config file name as an argument.')
+    sys.exit(1)
+
+if not args.dry_run:
     if args.password:
         password = getpass.getpass()
     else:
@@ -63,6 +68,15 @@ if not args.refdir:
 else:
     refdir = args.refdir
 
+config = configparser.ConfigParser()
+config.read(args.config)
+depnames = config.sections()
+print(depnames)
+import importlib
+
+
+
+
 @contextmanager
 def pushd(newDir):
     '''Context manager function for shell-like pushd functionality
@@ -76,24 +90,6 @@ def pushd(newDir):
     os.chdir(newDir)
     yield
     os.chdir(previousDir)
-
-
-def compute_md5(fname):
-    import hashlib
-    md5 = hashlib.md5()
-    BUF_SIZE = 65536
-
-    with open(fname, 'rb') as f:
-        while True:
-            data = f.read(BUF_SIZE)
-            if not data:
-                break
-            md5.update(data)
-    return(md5.hexdigest())
-
-
-import query_cfitsio as qcfitsio
-#import query_github as qcfitsio
 
 
 class release_notifier():
@@ -110,14 +106,14 @@ class release_notifier():
         self.issue_title = self.issue_title_base + self.dep_name
         self.comment_base = ('This is a message from an automated system '
             'that monitors `{}` releases.\n'.format(self.dep_name))
-        self.testing = False
+        self.dry_run = False
         self.remote_ver = None
 
     def get_version(self):
-        return qcfitsio.get_version()
+        return depchecker.get_version()
 
     def get_changelog(self, ref_ver_data, new_ver_data):
-        return qcfitsio.get_changelog(ref_ver_data, new_ver_data)
+        return depchecker.get_changelog(ref_ver_data, new_ver_data)
 
     def new_version(self):
         print('Reading version reference info from: {}'.format(self.ref_file))
@@ -131,13 +127,13 @@ class release_notifier():
     def create_github_issue(self):
         # Push changes text to a new/existing issue on Github.
         self.comment = self.comment_base + '/n' + self.comment
-        if self.testing:
+        if self.dry_run:
             print(self.comment)
         else:
             print('Posting comment to Github...')
             gh = github3.login(args.username, password=password)
             repo = args.notify_repo.split('/')
-            gh.create_issue(repo[0], repo[1], self.issue_title, self.comment) 
+            gh.create_issue(repo[0], repo[1], self.issue_title, self.comment)
 
     def update_version_ref(self):
         # Update version reference to inform the next run.
@@ -184,8 +180,16 @@ class release_notifier():
                     self.post_notification()
             else:
                 print('No new version detected for {}.'.format(self.dep_name))
-        
 
-n = release_notifier('cfitsio')
-#n = release_notifier('rendinam/auto-test')
-n.check_for_release()
+
+# For each dependency defined in the config file, query it for new releases
+# and post a notification if one is found.
+for depname in depnames:
+    plugin = config[depname]['plugin'].strip()
+    print('Plugin = {}'.format(plugin))
+    try:
+        depchecker = importlib.import_module(plugin)
+    except:
+        print('Import of plugin for {} failed.'.format(depname))
+    n = release_notifier(depname)
+    n.check_for_release()

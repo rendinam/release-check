@@ -3,19 +3,6 @@
 # get_version()
 # get_changelog()
 
-# A priori: compute MD5 of cfitsio 3.45, store persistently on disk.
-# Get latest tarball
-# Compute MD5 of tarball
-# Compare hash to previously stored value (kept in some persistent
-#   filesystem storage area.)
-# If the hashes are identical, exit.
-# If the hashes differ, unpack the tarball and extract the SONAME value
-#  compare SONAME value with previously stored value (kept in same
-#   persistent storage area.)
-#   Also extract latest changelog section for inclusion in github issue text.
-#   Indicate that a new release has been made in Github issue comment.
-# If the SONAME value differs, also indicate this in the status message.
-
 import urllib.request
 import tarfile
 
