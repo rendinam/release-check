@@ -94,11 +94,10 @@ def pushd(newDir):
 
 class release_notifier():
 
-    def __init__(self, depname):
+    def __init__(self, depname, refdir):
         self.dep_name = depname
-        self.ref_file = os.path.join(refdir, '{}_reference'.format(self.dep_name))
-        with open(self.ref_file) as f:
-            self.ref_ver_data = yaml.safe_load(f)
+        self.refdir = refdir
+        self.ref_file = os.path.join(self.refdir, '{}_reference'.format(self.dep_name))
         self.new_ver_data = None
         self.md5 = None
         self.ref_md5 = None
@@ -124,6 +123,16 @@ class release_notifier():
         else:
             return False
 
+    def reference_available(self):
+        if os.path.isfile(self.ref_file):
+            return True
+        else:
+            return False
+
+    def read_reference(self):
+        with open(self.ref_file) as f:
+            self.ref_ver_data = yaml.safe_load(f)
+
     def create_github_issue(self):
         # Push changes text to a new/existing issue on Github.
         self.comment = self.comment_base + '/n' + self.comment
@@ -134,6 +143,13 @@ class release_notifier():
             gh = github3.login(args.username, password=password)
             repo = args.notify_repo.split('/')
             gh.create_issue(repo[0], repo[1], self.issue_title, self.comment)
+    
+    def write_version_ref(self):
+        with open(self.ref_file, 'w') as f:
+            reference = yaml.safe_dump(self.new_ver_data)
+            print(reference)
+            f.write(reference)
+        
 
     def update_version_ref(self):
         # Update version reference to inform the next run.
@@ -144,10 +160,7 @@ class release_notifier():
 
         print('Updating {} version refrence.  '.format(self.dep_name), end='')
         try:
-            with open(self.ref_file, 'w') as f:
-                reference = yaml.safe_dump(self.new_ver_data)
-                print(reference)
-                f.write(reference)
+            self.write_version_ref()
             print('Done.')
         except:
             print('\nERROR writing reference file. To provide the correct reference\n'
@@ -169,27 +182,40 @@ class release_notifier():
             # roll back version reference
             shutilcopy(self.ref_backup, self.ref_file)
 
+ 
     def check_for_release(self):
         with tempfile.TemporaryDirectory() as self.tmpdir:
             with pushd(self.tmpdir):
                 self.new_ver_data = self.get_version()
                 self.remote_ver = self.new_ver_data['version']
-            if n.new_version():
-                with pushd(self.tmpdir):
-                    self.comment = self.get_changelog(self.ref_ver_data, self.new_ver_data)
-                    self.post_notification()
+            # Check for presence of version reference. If it does not exist,
+            # bootstrap future queries by storing the current remote version
+            # info as the reference.
+            if self.reference_available():
+                self.read_reference()
+                if n.new_version():
+                    with pushd(self.tmpdir):
+                        self.comment = self.get_changelog(self.ref_ver_data, self.new_ver_data)
+                        self.post_notification()
+                else:
+                    print('No new version detected for {}.'.format(self.dep_name))
             else:
-                print('No new version detected for {}.'.format(self.dep_name))
+                print('No existing version reference found for {}'.format(
+                    self.dep_name))
+                print('Storing remote version as new reference: {}'.format(
+                    os.path.join(self.refdir, self.ref_file)))
+                self.write_version_ref()
 
 
-# For each dependency defined in the config file, query it for new releases
-# and post a notification if one is found.
-for depname in depnames:
-    plugin = config[depname]['plugin'].strip()
-    print('Plugin = {}'.format(plugin))
-    try:
-        depchecker = importlib.import_module(plugin)
-    except:
-        print('Import of plugin for {} failed.'.format(depname))
-    n = release_notifier(depname)
-    n.check_for_release()
+if __name__ == '__main__':
+    # For each dependency defined in the config file, query it for new releases
+    # and post a notification if one is found.
+    for depname in depnames:
+        plugin = config[depname]['plugin'].strip()
+        print('Plugin = {}'.format(plugin))
+        try:
+            depchecker = importlib.import_module(plugin)
+        except:
+            print('Import of plugin for {} failed.'.format(depname))
+        n = release_notifier(depname, refdir)
+        n.check_for_release()
