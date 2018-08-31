@@ -1,4 +1,17 @@
 #!/usr/bin/env python3
+#
+# Botstuff
+# Install relcheck on a publically-facing server and schedule it for periodic execution.
+# To obtain the services of relcheck, add a github app to each repository that shall
+#    receive issue postings for dependency updates.
+# To instruct the remote app which dependencies to check
+#    post a specially formatted issue? This issue will be referenced as the config
+#    in all subsequent
+#
+# Allow server-side restriction on where this bot can be added as a Github app.
+#   I.e. if org or repo is not whitelisted on server, any request to add it as
+#   a bot elsewhere will fail.
+
 
 import os
 import sys
@@ -11,6 +24,7 @@ import tempfile
 import argparse
 import shutil
 from contextlib import contextmanager
+import importlib
 
 import yaml
 import getpass
@@ -48,7 +62,7 @@ parser.add_argument('-c',
 args = parser.parse_args()
 
 if not args.config:
-    print('Please supply a config file name as an argument.')
+    print('Provide a config file name as an argument.')
     sys.exit(1)
 
 if not args.dry_run:
@@ -56,9 +70,9 @@ if not args.dry_run:
         password = getpass.getpass()
     else:
         try:
-            password = os.environ['RELEASECHECK_PW']
+            password = os.environ['RELCHECK_PW']
         except KeyError:
-            print('Environment variable RELEASECHECK_PW not defined.')
+            print('Environment variable RELCHECK_PW not defined.')
             print('Store the Github password in that variable or run with `-p` to'
                     'prompt for the password interactively.')
             sys.exit(1)
@@ -68,13 +82,11 @@ if not args.refdir:
 else:
     refdir = args.refdir
 
+
+# Read config file.
 config = configparser.ConfigParser()
 config.read(args.config)
 depnames = config.sections()
-print(depnames)
-import importlib
-
-
 
 
 @contextmanager
@@ -95,9 +107,10 @@ def pushd(newDir):
 class release_notifier():
 
     def __init__(self, depname, refdir):
+        # Normalize path-like dependency names.
         self.dep_name = depname
         self.refdir = refdir
-        self.ref_file = os.path.join(self.refdir, '{}_reference'.format(self.dep_name))
+        self.ref_file = self.gen_ref_filename()
         self.new_ver_data = None
         self.md5 = None
         self.ref_md5 = None
@@ -108,10 +121,18 @@ class release_notifier():
         self.dry_run = False
         self.remote_ver = None
 
+    def gen_ref_filename(self):
+        norm_depname = self.dep_name.replace('/', '-')
+        return os.path.join(self.refdir, '{}_reference'.format(norm_depname))
+
     def get_version(self):
-        return depchecker.get_version()
+        '''This is the version retrieval entry point for the plugin assigned
+        as the release checker for this notifier instance.'''
+        return depchecker.get_version(self.dep_name)
 
     def get_changelog(self, ref_ver_data, new_ver_data):
+        '''This is the changelog retrieval entry point for the plugin assigned
+        as the release checker for this notifier instance.'''
         return depchecker.get_changelog(ref_ver_data, new_ver_data)
 
     def new_version(self):
@@ -149,7 +170,6 @@ class release_notifier():
             reference = yaml.safe_dump(self.new_ver_data)
             print(reference)
             f.write(reference)
-        
 
     def update_version_ref(self):
         # Update version reference to inform the next run.
@@ -163,26 +183,22 @@ class release_notifier():
             self.write_version_ref()
             print('Done.')
         except:
-            print('\nERROR writing reference file. To provide the correct reference\n'
-                'for the next run and avoid duplicated Github issue comments, \n'
-                'copy the following line as the sole contents the file \n'
-                '{}.\n\n'
+            print('\nERROR writing reference file. To provide the correct '
+                'reference\nfor the next run and avoid duplicated Github '
+                'issue comments, \ncopy the following line as the sole '
+                'contents the file \n{}.\n\n'
                 '{}'.format(self.ref_file, reference))
 
     def post_notification(self):
         self.update_version_ref()
         # For each notification type desired, post one.
-        # TODO: support notification types:
-        #       e-mail?
-        #       confluence?
-        #       slack?
+        # TODO: support other notification types?
         try:
             self.create_github_issue()
         except:
             # roll back version reference
             shutilcopy(self.ref_backup, self.ref_file)
 
- 
     def check_for_release(self):
         with tempfile.TemporaryDirectory() as self.tmpdir:
             with pushd(self.tmpdir):
@@ -195,10 +211,12 @@ class release_notifier():
                 self.read_reference()
                 if n.new_version():
                     with pushd(self.tmpdir):
-                        self.comment = self.get_changelog(self.ref_ver_data, self.new_ver_data)
+                        self.comment = self.get_changelog(
+                                self.ref_ver_data, self.new_ver_data)
                         self.post_notification()
                 else:
-                    print('No new version detected for {}.'.format(self.dep_name))
+                    print('No new version detected for {}.'.format(
+                        self.dep_name))
             else:
                 print('No existing version reference found for {}'.format(
                     self.dep_name))
@@ -211,10 +229,11 @@ if __name__ == '__main__':
     # For each dependency defined in the config file, query it for new releases
     # and post a notification if one is found.
     for depname in depnames:
-        plugin = config[depname]['plugin'].strip()
-        print('Plugin = {}'.format(plugin))
+        plugin_name = 'plugins.' + config[depname]['plugin'].strip()
+        print('Plugin = {}'.format(plugin_name))
         try:
-            depchecker = importlib.import_module(plugin)
+            depchecker = importlib.import_module(plugin_name)
+            print('import success')
         except:
             print('Import of plugin for {} failed.'.format(depname))
         n = release_notifier(depname, refdir)
